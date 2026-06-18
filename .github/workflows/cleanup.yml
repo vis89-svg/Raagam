@@ -1,0 +1,61 @@
+name: Cleanup Old Cached Songs
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove old cached MP3s
+        run: |
+          echo "Cleaning up old cached songs..."
+          DELETED=0
+          for file in cache/*.mp3; do
+            if [ -f "$file" ]; then
+              if [ $(($(date +%s) - $(stat -c %Y "$file"))) -gt 3600 ]; then
+                echo "Deleting: $file"
+                rm "$file"
+                DELETED=$((DELETED + 1))
+              fi
+            fi
+          done
+          echo "Deleted $DELETED files"
+
+      - name: Update database
+        run: |
+          python3 -c "
+          import json, os, glob
+          if not os.path.exists('data/songs.json'):
+            exit(0)
+          with open('data/songs.json', 'r') as f:
+              db = json.load(f)
+          cached = set(os.path.basename(f).replace('.mp3', '') for f in glob.glob('cache/*.mp3'))
+          before = len(db['songs'])
+          db['songs'] = [s for s in db['songs'] if s['id'] in cached]
+          with open('data/songs.json', 'w') as f:
+              json.dump(db, f, indent=2)
+          print(f'DB: {before} -> {len(db[\"songs\"])} entries')
+          "
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "Raagam Bot"
+          git config user.email "raagam-bot@users.noreply.github.com"
+          git add cache/ data/songs.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Cleanup: Removed old cached songs"
+            git push
+            echo "Cleanup committed!"
+          fi

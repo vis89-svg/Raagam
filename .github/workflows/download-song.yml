@@ -1,0 +1,89 @@
+name: Download and Cache Song
+
+on:
+  repository_dispatch:
+    types: [download-song]
+
+jobs:
+  download-and-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install yt-dlp
+        run: |
+          python3 -m pip install --quiet yt-dlp
+          yt-dlp --version
+
+      - name: Create cache directory
+        run: mkdir -p cache
+
+      - name: Download song from YouTube
+        env:
+          VIDEO_ID: ${{ github.event.client_payload.video_id }}
+          TITLE: ${{ github.event.client_payload.title }}
+        run: |
+          echo "Downloading: $TITLE (ID: $VIDEO_ID)"
+          yt-dlp \
+            --extract-audio \
+            --audio-format mp3 \
+            --audio-quality 0 \
+            --output "cache/${VIDEO_ID}.mp3" \
+            --no-playlist \
+            --retries 3 \
+            --no-overwrites \
+            "https://www.youtube.com/watch?v=${VIDEO_ID}"
+          if [ -f "cache/${VIDEO_ID}.mp3" ]; then
+            SIZE=$(du -h "cache/${VIDEO_ID}.mp3" | cut -f1)
+            echo "Downloaded! Size: $SIZE"
+          else
+            echo "Download failed!"
+            exit 1
+          fi
+
+      - name: Update songs database
+        env:
+          VIDEO_ID: ${{ github.event.client_payload.video_id }}
+          TITLE: ${{ github.event.client_payload.title }}
+          AUTHOR: ${{ github.event.client_payload.author }}
+        run: |
+          if [ ! -f data/songs.json ]; then
+            echo '{"songs":[]}' > data/songs.json
+          fi
+          python3 -c "
+          import json, os
+          from datetime import datetime
+          with open('data/songs.json', 'r') as f:
+              db = json.load(f)
+          song = {
+              'id': os.environ['VIDEO_ID'],
+              'title': os.environ['TITLE'],
+              'author': os.environ['AUTHOR'],
+              'cached_at': datetime.utcnow().isoformat() + 'Z',
+              'file': f'cache/{os.environ[\"VIDEO_ID\"]}.mp3'
+          }
+          db['songs'] = [s for s in db['songs'] if s['id'] != song['id']]
+          db['songs'].insert(0, song)
+          db['songs'] = db['songs'][:50]
+          with open('data/songs.json', 'w') as f:
+              json.dump(db, f, indent=2)
+          print(f'DB updated: {song[\"title\"]}')
+          "
+
+      - name: Commit and push
+        run: |
+          git config user.name "Raagam Bot"
+          git config user.email "raagam-bot@users.noreply.github.com"
+          git add cache/ data/songs.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Cache: ${{ github.event.client_payload.title }}"
+            git push
+            echo "Pushed!"
+          fi
