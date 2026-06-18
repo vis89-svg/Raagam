@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Raagam - Music Player</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fas fa-music"></i>
+                <span>Raagam</span>
+            </div>
+            <nav class="nav-links">
+                <a href="#" class="nav-link active" data-view="home">
+                    <i class="fas fa-home"></i> Home
+                </a>
+                <a href="#" class="nav-link" data-view="search">
+                    <i class="fas fa-search"></i> Search
+                </a>
+                <a href="#" class="nav-link" data-view="library">
+                    <i class="fas fa-book"></i> Library
+                </a>
+                <a href="#" class="nav-link" data-view="playlists">
+                    <i class="fas fa-list"></i> Playlists
+                </a>
+                <a href="#" class="nav-link" data-view="history">
+                    <i class="fas fa-history"></i> History
+                </a>
+            </nav>
+            <div class="sidebar-queue">
+                <h4>Up Next</h4>
+                <div id="queue-list" class="queue-list">
+                    <p class="empty-queue">Search and play songs to build your queue</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Search songs, artists, albums..." autocomplete="off">
+                    <button id="search-btn" class="btn-search">Search</button>
+                </div>
+                <div class="header-actions">
+                    <span class="status-indicator" id="status">
+                        <i class="fas fa-circle"></i> Ready
+                    </span>
+                </div>
+            </header>
+
+            <!-- Views -->
+            <div id="view-home" class="view active">
+                <div class="hero">
+                    <h1>Welcome to Raagam 🎵</h1>
+                    <p>Search any song and start listening. Songs are cached temporarily for fast playback.</p>
+                </div>
+                <div class="section">
+                    <h2><i class="fas fa-fire"></i> Popular Searches</h2>
+                    <div class="quick-search-tags">
+                        <button class="tag" data-query="Arijit Singh">Arijit Singh</button>
+                        <button class="tag" data-query="Sid Sriram">Sid Sriram</button>
+                        <button class="tag" data-query="Pradeep Kumar">Pradeep Kumar</button>
+                        <button class="tag" data-query="Anirudh">Anirudh</button>
+                        <button class="tag" data-query="D Imman">D Imman</button>
+                        <button class="tag" data-query="Haricharan">Haricharan</button>
+                        <button class="tag" data-query="Sanjith Hegde">Sanjith Hegde</button>
+                        <button class="tag" data-query="Pop Hits">Pop Hits</button>
+                    </div>
+                </div>
+                <div class="section">
+                    <h2><i class="fas fa-clock"></i> Recently Played</h2>
+                    <div id="recent-songs" class="song-grid">
+                        <p class="empty-state">Your recently played songs will appear here</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-search" class="view">
+                <div class="section">
+                    <h2><i class="fas fa-search"></i> Search Results</h2>
+                    <div id="search-results" class="song-grid">
+                        <p class="empty-state">Search for your favorite songs above ☝️</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-library" class="view">
+                <div class="section">
+                    <h2><i class="fas fa-book"></i> Your Library</h2>
+                    <p class="info-text"><i class="fas fa-info-circle"></i> Songs are cached temporarily and auto-deleted after 1 hour. Search and play to refresh.</p>
+                    <div id="library-songs" class="song-grid">
+                        <p class="empty-state">No cached songs. Play something!</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-playlists" class="view">
+                <div class="section">
+                    <h2><i class="fas fa-list"></i> Playlists</h2>
+                    <div id="playlist-songs" class="song-grid">
+                        <p class="empty-state">No playlists yet. Coming soon!</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-history" class="view">
+                <div class="section">
+                    <h2><i class="fas fa-history"></i> Play History</h2>
+                    <div id="history-songs" class="song-grid">
+                        <p class="empty-state">No history yet. Start listening!</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Player Bar -->
+        <footer class="player-bar" id="player-bar">
+            <div class="now-playing">
+                <div class="now-playing-info" id="now-playing-info">
+                    <span class="np-title">Not Playing</span>
+                    <span class="np-artist">Search a song to begin</span>
+                </div>
+            </div>
+            <div class="player-controls">
+                <button class="ctrl-btn" id="btn-shuffle" title="Shuffle"><i class="fas fa-random"></i></button>
+                <button class="ctrl-btn" id="btn-prev" title="Previous"><i class="fas fa-step-backward"></i></button>
+                <button class="ctrl-btn btn-play" id="btn-play" title="Play/Pause"><i class="fas fa-play"></i></button>
+                <button class="ctrl-btn" id="btn-next" title="Next"><i class="fas fa-step-forward"></i></button>
+                <button class="ctrl-btn" id="btn-repeat" title="Repeat"><i class="fas fa-redo"></i></button>
+            </div>
+            <div class="progress-section">
+                <span class="time" id="current-time">0:00</span>
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <span class="time" id="total-time">0:00</span>
+            </div>
+            <div class="volume-section">
+                <i class="fas fa-volume-up"></i>
+                <input type="range" id="volume-slider" min="0" max="100" value="80">
+            </div>
+        </footer>
+    </div>
+
+    <!-- Hidden Audio Element -->
+    <audio id="audio-player" preload="auto"></audio>
+
+    <script src="player.js"></script>
+</body>
+</html>
