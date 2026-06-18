@@ -1,12 +1,31 @@
 // 🎵 Raagam Music Player - Main JavaScript
+// Direct streaming via Invidious/Piped - No token needed!
 
 // ===== CONFIG =====
 const GITHUB_USER = 'vis89-svg';
 const GITHUB_REPO = 'Raagam';
-const GITHUB_TOKEN = '***'; // Will be used for API calls
 const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main`;
-const API_BASE = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}`;
-const DISPATCH_URL = `${API_BASE}/dispatches`;
+
+// Invidious instances for search + stream
+const INVIDIOUS_INSTANCES = [
+    'https://invidious.privacyredirect.com',
+    'https://invidious.materialio.us',
+    'https://yt.cdaut.de',
+    'https://invidious.protokolla.fi',
+    'https://yt.artemislena.eu',
+    'https://yewtu.be',
+    'https://inv.tux.pizza',
+    'https://iv.datura.network',
+    'https://invidious.privacydev.net',
+    'https://inv.nadeko.net',
+];
+
+// Piped instances for fallback search + stream
+const PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.adminforge.de',
+    'https://pipedapi.syncpundit.io',
+];
 
 // ===== STATE =====
 const state = {
@@ -18,7 +37,7 @@ const state = {
     repeat: false,
     history: [],
     searchResults: [],
-    cachedSongs: []
+    currentStreamUrl: null
 };
 
 // ===== DOM ELEMENTS =====
@@ -75,7 +94,6 @@ document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.add('active');
         document.getElementById(`view-${view}`).classList.add('active');
         if (view === 'history') renderHistory();
-        if (view === 'library') renderLibrary();
     });
 });
 
@@ -100,7 +118,6 @@ async function performSearch() {
     setStatus('Searching...', true);
     showToast(`Searching for "${query}"...`, 'info');
 
-    // Switch to search view
     document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelector('[data-view="search"]').classList.add('active');
@@ -109,7 +126,6 @@ async function performSearch() {
     searchResultsEl.innerHTML = '<div class="empty-state"><div class="spinner"></div> Searching...</div>';
 
     try {
-        // Use YouTube search via Invidious (free, no API key needed)
         const results = await searchYouTube(query);
         state.searchResults = results;
         renderSearchResults(results);
@@ -123,20 +139,14 @@ async function performSearch() {
 }
 
 async function searchYouTube(query) {
-    // Use Invidious API (free YouTube alternative, no API key)
-    const instances = [
-        'https://vid.puffyan.us',
-        'https://invidious.fdn.fr',
-        'https://y.com.sb',
-        'https://invidious.nerdvpn.de'
-    ];
-
-    for (const instance of instances) {
+    // Approach 1: Invidious
+    for (const instance of INVIDIOUS_INSTANCES) {
         try {
             const url = `${instance}/api/v1/search?q=${encodeURIComponent(query + ' audio')}&type=video&sort_by=relevance`;
             const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
             if (!resp.ok) continue;
             const data = await resp.json();
+            if (!data || !data.length) continue;
             return data.slice(0, 15).map(item => ({
                 id: item.videoId,
                 title: item.title,
@@ -150,8 +160,28 @@ async function searchYouTube(query) {
         }
     }
 
-    // Fallback: return empty with message
-    throw new Error('All search instances failed. Check your internet.');
+    // Approach 2: Piped
+    for (const instance of PIPED_INSTANCES) {
+        try {
+            const url = `${instance}/search?q=${encodeURIComponent(query + ' audio')}&filter=videos`;
+            const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            if (!data?.relatedItems?.length) continue;
+            return data.relatedItems.slice(0, 15).map(item => ({
+                id: item.url?.split('v=')[1]?.split('&')[0] || '',
+                title: item.title,
+                author: item.uploaderName || 'Unknown',
+                duration: formatDuration(item.duration || 0),
+                thumbnail: item.thumbnail || '',
+                query: query
+            })).filter(s => s.id);
+        } catch (e) {
+            continue;
+        }
+    }
+
+    throw new Error('Search temporarily unavailable. Check your internet or try again.');
 }
 
 function renderSearchResults(results) {
@@ -214,143 +244,105 @@ function attachSongCardListeners() {
     });
 }
 
-// ===== PLAYBACK =====
+// ===== PLAYBACK - DIRECT STREAM =====
 async function playSong(index, source) {
     const songs = source === 'search' ? state.searchResults :
                   source === 'queue' ? state.queue :
-                  source === 'history' ? state.history :
-                  state.cachedSongs;
+                  source === 'history' ? state.history : [];
     const song = songs[index];
     if (!song) return;
 
-    setStatus('Loading song...', true);
+    setStatus('Loading stream...', true);
     showToast(`Loading: ${song.title}`, 'info');
 
-    // Check if song is already cached on GitHub
-    const cachedUrl = `${RAW_BASE}/cache/${song.id}.mp3`;
-
     try {
-        // Try to play from cache first
-        const cacheCheck = await fetch(cachedUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
-
-        if (cacheCheck.ok) {
-            // Song is cached! Play directly
-            playAudio(cachedUrl, song);
-            showToast('Playing from cache! 🎵', 'success');
+        // Get direct stream URL from Invidious
+        const streamUrl = await getStreamUrl(song.id);
+        if (streamUrl) {
+            playAudio(streamUrl, song);
+            showToast('Playing! 🎵', 'success');
         } else {
-            // Not cached - trigger GitHub Action to download
-            showToast('Song not cached. Triggering download...', 'warning');
-            cardShowLoading(index, source);
-
-            await triggerDownload(song);
-
-            // Poll for the file to appear
-            const fileUrl = await pollForFile(song.id, 60); // Wait up to 60 seconds
-            if (fileUrl) {
-                playAudio(fileUrl, song);
-                showToast('Song ready! Playing now 🎵', 'success');
-            } else {
-                showToast('Download timed out. Try again.', 'error');
-            }
+            throw new Error('Could not get stream URL');
         }
     } catch (err) {
-        // If cache check fails, try direct download trigger
-        showToast('Checking cache failed. Downloading...', 'warning');
-        cardShowLoading(index, source);
+        showToast(`Failed: ${err.message}`, 'error');
+        setStatus('Playback failed');
+    }
+}
 
+async function getStreamUrl(videoId) {
+    // Try Invidious first for direct audio stream URL
+    for (const instance of INVIDIOUS_INSTANCES) {
         try {
-            await triggerDownload(song);
-            const fileUrl = await pollForFile(song.id, 60);
-            if (fileUrl) {
-                playAudio(fileUrl, song);
-                showToast('Playing! 🎵', 'success');
-            } else {
-                showToast('Download timed out.', 'error');
+            const url = `${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats,formatStreams`;
+            const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            
+            // Get adaptive formats (audio only) - highest quality first
+            const adaptiveFormats = data.adaptiveFormats || [];
+            const audioFormats = adaptiveFormats.filter(f => 
+                f.type?.startsWith('audio/') || f.audioQuality
+            );
+            
+            if (audioFormats.length > 0) {
+                audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+                return audioFormats[0].url;
+            }
+            
+            // Fallback: try formatStreams
+            const formatStreams = data.formatStreams || [];
+            if (formatStreams.length > 0) {
+                return formatStreams[0].url;
             }
         } catch (e) {
-            showToast('Failed to load song. Try again.', 'error');
+            continue;
         }
     }
-
-    cardRemoveLoading();
+    
+    // Fallback: Try Piped for stream URL
+    for (const instance of PIPED_INSTANCES) {
+        try {
+            const url = `${instance}/streams/${videoId}`;
+            const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            
+            if (data.audioStreams?.length > 0) {
+                // Sort by bitrate, pick highest
+                const streams = data.audioStreams.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+                return streams[0].url;
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    
+    return null;
 }
 
 function playAudio(url, song) {
+    // Stop current playback
+    audio.pause();
+    audio.src = '';
+    
+    // Set new source
     audio.src = url;
+    audio.load();
+    
     audio.play().then(() => {
         state.currentSong = song;
         state.isPlaying = true;
+        state.currentStreamUrl = url;
         updateNowPlaying(song);
         updatePlayButton();
         addToHistory(song);
         setStatus('Playing');
-        renderSearchResults(state.searchResults); // Re-render to show playing state
+        renderSearchResults(state.searchResults);
     }).catch(err => {
-        showToast('Playback failed. Try again.', 'error');
+        showToast('Playback failed. Try another song.', 'error');
         setStatus('Playback error');
     });
-}
-
-function cardShowLoading(index, source) {
-    const cards = document.querySelectorAll(`.song-card[data-index="${index}"][data-source="${source}"]`);
-    cards.forEach(card => {
-        if (!card.querySelector('.loading-overlay')) {
-            const overlay = document.createElement('div');
-            overlay.className = 'loading-overlay';
-            overlay.innerHTML = '<div class="spinner"></div> Downloading...';
-            card.appendChild(overlay);
-        }
-    });
-}
-
-function cardRemoveLoading() {
-    document.querySelectorAll('.loading-overlay').forEach(el => el.remove());
-}
-
-// ===== GITHUB ACTIONS TRIGGER =====
-async function triggerDownload(song) {
-    const payload = {
-        event_type: 'download-song',
-        client_payload: {
-            video_id: song.id,
-            title: song.title,
-            author: song.author || 'Unknown',
-            query: song.query || ''
-        }
-    };
-
-    const resp = await fetch(DISPATCH_URL, {
-        method: 'POST',
-        headers: {
-            'Authorization': `token ${GITHUB_TOKEN}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-    });
-
-    if (!resp.ok && resp.status !== 204) {
-        throw new Error(`Dispatch failed: ${resp.status}`);
-    }
-}
-
-async function pollForFile(videoId, maxSeconds = 60) {
-    const url = `${RAW_BASE}/cache/${videoId}.mp3`;
-
-    for (let i = 0; i < maxSeconds; i++) {
-        await sleep(1000);
-        try {
-            const resp = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
-            if (resp.ok) return url;
-        } catch (e) {
-            // Keep polling
-        }
-    }
-    return null;
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ===== QUEUE =====
@@ -380,18 +372,16 @@ function renderQueue() {
         item.addEventListener('click', () => {
             const idx = parseInt(item.dataset.queueIndex);
             state.queueIndex = idx;
-            playAudioFromQueue(idx);
+            playSongFromQueue(idx);
         });
     });
 }
 
-function playAudioFromQueue(index) {
+function playSongFromQueue(index) {
     const song = state.queue[index];
     if (!song) return;
     state.queueIndex = index;
-
-    const cachedUrl = `${RAW_BASE}/cache/${song.id}.mp3`;
-    playAudio(cachedUrl, song);
+    playSong(index, 'queue');
 }
 
 // ===== PLAYER CONTROLS =====
@@ -410,7 +400,7 @@ btnPlay.addEventListener('click', () => {
 btnPrev.addEventListener('click', () => {
     if (state.queue.length && state.queueIndex > 0) {
         state.queueIndex--;
-        playAudioFromQueue(state.queueIndex);
+        playSongFromQueue(state.queueIndex);
     } else {
         audio.currentTime = 0;
     }
@@ -419,7 +409,7 @@ btnPrev.addEventListener('click', () => {
 btnNext.addEventListener('click', () => {
     if (state.queue.length && state.queueIndex < state.queue.length - 1) {
         state.queueIndex++;
-        playAudioFromQueue(state.queueIndex);
+        playSongFromQueue(state.queueIndex);
     }
 });
 
@@ -448,7 +438,7 @@ function updateNowPlaying(song) {
 
 // ===== PROGRESS BAR =====
 audio.addEventListener('timeupdate', () => {
-    if (audio.duration) {
+    if (audio.duration && isFinite(audio.duration)) {
         const pct = (audio.currentTime / audio.duration) * 100;
         progressFill.style.width = `${pct}%`;
         currentTimeEl.textContent = formatTime(audio.currentTime);
@@ -462,11 +452,16 @@ audio.addEventListener('ended', () => {
         audio.play();
     } else if (state.queue.length && state.queueIndex < state.queue.length - 1) {
         state.queueIndex++;
-        playAudioFromQueue(state.queueIndex);
+        playSongFromQueue(state.queueIndex);
     } else {
         state.isPlaying = false;
         updatePlayButton();
     }
+});
+
+audio.addEventListener('error', () => {
+    showToast('Stream error. Try another song.', 'error');
+    setStatus('Stream error');
 });
 
 progressBar.addEventListener('click', (e) => {
@@ -483,13 +478,9 @@ volumeSlider.addEventListener('input', () => {
 
 // ===== HISTORY =====
 function addToHistory(song) {
-    // Remove if already exists
     state.history = state.history.filter(s => s.id !== song.id);
-    // Add to front
     state.history.unshift({ ...song, playedAt: Date.now() });
-    // Keep max 50
     if (state.history.length > 50) state.history.pop();
-    // Save to localStorage
     localStorage.setItem('raagam_history', JSON.stringify(state.history));
     renderRecentSongs();
 }
@@ -513,48 +504,31 @@ function renderHistory() {
     attachSongCardListeners();
 }
 
-// ===== LIBRARY (CACHED SONGS) =====
-async function renderLibrary() {
-    librarySongsEl.innerHTML = '<p class="empty-state"><div class="spinner"></div> Checking cache...</p>';
+// ===== LIBRARY =====
+function renderLibrary() {
+    librarySongsEl.innerHTML = '<p class="empty-state">Library feature coming soon! For now, check your History tab.</p>';
+}
 
-    try {
-        // Check what's in the cache folder
-        const resp = await fetch(`${API_BASE}/contents/cache`, {
-            headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
-        });
-
-        if (!resp.ok) {
-            librarySongsEl.innerHTML = '<p class="empty-state">No cached songs. Play something!</p>';
-            return;
+// ===== LOADING OVERLAY =====
+function cardShowLoading(index, source) {
+    const cards = document.querySelectorAll(`.song-card[data-index="${index}"][data-source="${source}"]`);
+    cards.forEach(card => {
+        if (!card.querySelector('.loading-overlay')) {
+            const overlay = document.createElement('div');
+            overlay.className = 'loading-overlay';
+            overlay.innerHTML = '<div class="spinner"></div> Loading...';
+            card.appendChild(overlay);
         }
+    });
+}
 
-        const files = await resp.json();
-        const mp3Files = files.filter(f => f.name.endsWith('.mp3'));
-
-        if (!mp3Files.length) {
-            librarySongsEl.innerHTML = '<p class="empty-state">No cached songs. Play something!</p>';
-            return;
-        }
-
-        // Convert to song cards
-        state.cachedSongs = mp3Files.map(f => ({
-            id: f.name.replace('.mp3', ''),
-            title: f.name.replace('.mp3', '').replace(/_/g, ' '),
-            author: 'Cached',
-            duration: '',
-            cached: true
-        }));
-
-        librarySongsEl.innerHTML = state.cachedSongs.map((song, i) => createSongCard(song, i, 'library')).join('');
-        attachSongCardListeners();
-    } catch (err) {
-        librarySongsEl.innerHTML = '<p class="empty-state">No cached songs yet.</p>';
-    }
+function cardRemoveLoading() {
+    document.querySelectorAll('.loading-overlay').forEach(el => el.remove());
 }
 
 // ===== UTILITY FUNCTIONS =====
 function formatTime(seconds) {
-    if (!seconds || isNaN(seconds)) return '0:00';
+    if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00';
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
@@ -576,7 +550,6 @@ function escapeHtml(str) {
 
 // ===== INIT =====
 function init() {
-    // Load history from localStorage
     try {
         const saved = localStorage.getItem('raagam_history');
         if (saved) state.history = JSON.parse(saved);
