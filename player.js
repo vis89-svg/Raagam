@@ -12,20 +12,6 @@ const DISPATCH_URL = `${API_BASE}/dispatches`;
 // It can only trigger Actions and push to this specific repo
 const GITHUB_TOKEN = 'ghp_REPLACE_WITH_YOUR_NEW_TOKEN';
 
-// Invidious instances for YouTube search (no API key needed)
-const INVIDIOUS_INSTANCES = [
-    'https://invidious.privacyredirect.com',
-    'https://invidious.materialio.us',
-    'https://yt.cdaut.de',
-    'https://invidious.protokolla.fi',
-    'https://yt.artemislena.eu',
-    'https://yewtu.be',
-    'https://inv.tux.pizza',
-    'https://iv.datura.network',
-    'https://invidious.privacydev.net',
-    'https://inv.nadeko.net',
-];
-
 // ===== STATE =====
 const state = {
     currentSong: null,
@@ -140,25 +126,32 @@ async function performSearch() {
 }
 
 async function searchYouTube(query) {
-    for (const instance of INVIDIOUS_INSTANCES) {
-        try {
-            const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`;
-            const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-            if (!resp.ok) continue;
-            const data = await resp.json();
-            if (!data || !data.length) continue;
-            return data.slice(0, 15).map(item => ({
-                id: item.videoId,
-                title: item.title,
-                author: item.author || 'Unknown',
-                duration: formatDuration(item.lengthSeconds),
-                query: query
-            }));
-        } catch (e) {
-            continue;
+    // Use Netlify Function as CORS proxy to Invidious
+    const searchUrl = `/.netlify/functions/search?q=${encodeURIComponent(query)}`;
+    
+    try {
+        const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(15000) });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `Search failed (${resp.status})`);
         }
+        const data = await resp.json();
+        if (!data || !data.length) {
+            throw new Error('No results found. Try different keywords.');
+        }
+        return data.map(item => ({
+            id: item.id,
+            title: item.title,
+            author: item.author,
+            duration: item.duration || '',
+            query: query
+        }));
+    } catch (e) {
+        if (e.name === 'AbortError' || e.name === 'TimeoutError') {
+            throw new Error('Search timed out. Check your internet.');
+        }
+        throw e;
     }
-    throw new Error('All search servers failed. Check your internet connection.');
 }
 
 function renderSearchResults(results) {
