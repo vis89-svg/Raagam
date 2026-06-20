@@ -45,7 +45,7 @@ exports.handler = async (event) => {
     };
   }
 
-  const GITHUB_PAT = process.env.GITHUB_PAT;
+  const GITHUB_PAT = (process.env.GITHUB_PAT || '').trim();
   if (!GITHUB_PAT) {
     return {
       statusCode: 500,
@@ -75,8 +75,19 @@ exports.handler = async (event) => {
   }
 
   try {
-    const resp = await httpsPost(
-      'https://api.github.com/repos/vis89-svg/Raagam/dispatches',
+    const payloadBody = {
+      event_type: 'download-song',
+      client_payload: { video_id, title, author: author || '', query: query || '' },
+    };
+
+    const authVariants = [
+      {
+        'Authorization': `token ${GITHUB_PAT}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Raagam-Netlify-Function',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
       {
         'Authorization': `Bearer ${GITHUB_PAT}`,
         'Accept': 'application/vnd.github+json',
@@ -84,11 +95,20 @@ exports.handler = async (event) => {
         'User-Agent': 'Raagam-Netlify-Function',
         'X-GitHub-Api-Version': '2022-11-28',
       },
-      {
-        event_type: 'download-song',
-        client_payload: { video_id, title, author: author || '', query: query || '' },
+    ];
+
+    let resp;
+    for (const headers of authVariants) {
+      resp = await httpsPost(
+        'https://api.github.com/repos/vis89-svg/Raagam/dispatches',
+        headers,
+        payloadBody
+      );
+
+      if (resp.status !== 401 && resp.status !== 403) {
+        break;
       }
-    );
+    }
 
     if (resp.status === 200 || resp.status === 204) {
       return {
@@ -107,7 +127,7 @@ exports.handler = async (event) => {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({
         error: resp.status === 401 || resp.status === 403
-          ? 'GitHub authorization failed. Check that the Netlify GITHUB_PAT is valid and has repo access.'
+          ? 'GitHub authorization failed. The PAT may be invalid, expired, or missing repo/actions permissions.'
           : message,
       }),
     };
