@@ -5,12 +5,7 @@
 const GITHUB_USER = 'vis89-svg';
 const GITHUB_REPO = 'Raagam';
 const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main`;
-const API_BASE = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}`;
-const DISPATCH_URL = `${API_BASE}/dispatches`;
-
-// ⚠️ This token is safe to expose - scoped to THIS repo only
-// It can only trigger Actions and push to this specific repo
-const GITHUB_TOKEN = 'ghp_REPLACE_WITH_YOUR_NEW_TOKEN';
+const DISPATCH_URL = '/.netlify/functions/dispatch';
 
 // ===== STATE =====
 const state = {
@@ -267,25 +262,18 @@ function setCardLoading(index, source, loading) {
 async function triggerDownload(song) {
     const resp = await fetch(DISPATCH_URL, {
         method: 'POST',
-        headers: {
-            'Authorization': `token ${GITHUB_TOKEN}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            event_type: 'download-song',
-            client_payload: {
-                video_id: song.id,
-                title: song.title,
-                author: song.author,
-                query: song.query || ''
-            }
-        })
+            video_id: song.id,
+            title: song.title,
+            author: song.author,
+            query: song.query || '',
+        }),
     });
 
-    if (resp.status !== 200 && resp.status !== 204) {
-        const err = await resp.text();
-        throw new Error(`Trigger failed (${resp.status}): ${err.substring(0, 100)}`);
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Trigger failed (${resp.status})`);
     }
 }
 
