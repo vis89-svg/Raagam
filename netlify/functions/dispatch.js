@@ -32,6 +32,19 @@ function httpsPost(url, headers, body) {
 }
 
 exports.handler = async (event) => {
+  // Handle CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+      body: '',
+    };
+  }
+
   const GITHUB_PAT = process.env.GITHUB_PAT;
   if (!GITHUB_PAT) {
     return {

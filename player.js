@@ -279,18 +279,22 @@ async function triggerDownload(song) {
 
 async function pollForFile(videoId, maxSeconds) {
     const url = `${RAW_BASE}/cache/${videoId}.mp3`;
-    for (let i = 0; i < maxSeconds; i++) {
-        await sleep(1000);
+    const pollInterval = 3000; // 3 seconds between polls
+    const maxAttempts = Math.ceil(maxSeconds / 3);
+
+    for (let i = 0; i < maxAttempts; i++) {
+        await sleep(pollInterval);
         try {
-            const resp = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+            const resp = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
             if (resp.ok) return url;
         } catch (e) {
             // Keep polling
         }
-        // Update status every 10 seconds
-        if (i > 0 && i % 10 === 0) {
-            setStatus(`Downloading... ${i}s`);
-            showToast(`Still downloading... (${i}s elapsed)`, 'info');
+        // Update status every 15 seconds
+        const elapsed = (i + 1) * 3;
+        if (elapsed % 15 === 0) {
+            setStatus(`Downloading... ${elapsed}s`);
+            showToast(`Still downloading... (${elapsed}s elapsed)`, 'info');
         }
     }
     return null;
