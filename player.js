@@ -6,6 +6,8 @@ const GITHUB_USER = 'vis89-svg';
 const GITHUB_REPO = 'Raagam';
 const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main`;
 const DISPATCH_URL = '/.netlify/functions/dispatch';
+const GITHUB_PAT = 'ghp_3T...8cdd';
+const GITHUB_DISPATCH_API = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/dispatches`;
 
 // ===== STATE =====
 const state = {
@@ -260,20 +262,47 @@ function setCardLoading(index, source, loading) {
 
 // ===== GITHUB ACTIONS: TRIGGER DOWNLOAD =====
 async function triggerDownload(song) {
-    const resp = await fetch(DISPATCH_URL, {
+    // Try Netlify Function first, then fall back to direct GitHub API
+    try {
+        const resp = await fetch(DISPATCH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                video_id: song.id,
+                title: song.title,
+                author: song.author,
+                query: song.query || '',
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (resp.ok) return; // Netlify function worked
+    } catch (e) {
+        console.warn('Netlify function failed, using direct API:', e.message);
+    }
+
+    // Direct GitHub API call
+    const resp = await fetch(GITHUB_DISPATCH_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Authorization': `token ${GITHUB_PAT}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-            video_id: song.id,
-            title: song.title,
-            author: song.author,
-            query: song.query || '',
+            event_type: 'download-song',
+            client_payload: {
+                video_id: song.id,
+                title: song.title,
+                author: song.author,
+                query: song.query || '',
+            },
         }),
+        signal: AbortSignal.timeout(15000),
     });
 
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `Trigger failed (${resp.status})`);
+    if (resp.status !== 200 && resp.status !== 204) {
+        const err = await resp.text();
+        throw new Error(`Dispatch failed (${resp.status}): ${err.substring(0, 100)}`);
     }
 }
 
