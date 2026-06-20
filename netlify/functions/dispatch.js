@@ -78,10 +78,11 @@ exports.handler = async (event) => {
     const resp = await httpsPost(
       'https://api.github.com/repos/vis89-svg/Raagam/dispatches',
       {
-        'Authorization': `token ${GITHUB_PAT}`,
-        'Accept': 'application/vnd.github.v3+json',
+        'Authorization': `Bearer ${GITHUB_PAT}`,
+        'Accept': 'application/vnd.github+json',
         'Content-Type': 'application/json',
         'User-Agent': 'Raagam-Netlify-Function',
+        'X-GitHub-Api-Version': '2022-11-28',
       },
       {
         event_type: 'download-song',
@@ -97,10 +98,18 @@ exports.handler = async (event) => {
       };
     }
 
+    const message = resp.body && resp.body.trim()
+      ? resp.body
+      : `GitHub API returned ${resp.status}`;
+
     return {
-      statusCode: resp.status,
+      statusCode: resp.status >= 400 ? 502 : resp.status,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: `GitHub API returned ${resp.status}`, detail: resp.body }),
+      body: JSON.stringify({
+        error: resp.status === 401 || resp.status === 403
+          ? 'GitHub authorization failed. Check that the Netlify GITHUB_PAT is valid and has repo access.'
+          : message,
+      }),
     };
   } catch (e) {
     return {
